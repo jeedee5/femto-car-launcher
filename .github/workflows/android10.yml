@@ -130,8 +130,15 @@ jobs:
             exit 1
           fi
           echo "Decoded keystore: $(stat -c %s "$ks") bytes"
-          if ! keytool -list -keystore "$ks" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" > /dev/null; then
-            echo "::error::Keystore decoded, but RELEASE_KEYSTORE_PASSWORD or RELEASE_KEY_ALIAS does not match it."
+          # A pasted secret can carry a trailing CR/LF; keytool then rejects it.
+          STORE_PASSWORD=$(printf '%s' "$STORE_PASSWORD" | tr -d '\r\n')
+          KEY_ALIAS=$(printf '%s' "$KEY_ALIAS" | tr -d '\r\n')
+          # keytool's own message says which one is wrong (secrets stay masked).
+          if ! out=$(keytool -list -keystore "$ks" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" 2>&1); then
+            echo "$out"
+            echo "Aliases in this keystore:"
+            keytool -list -keystore "$ks" -storepass "$STORE_PASSWORD" 2>&1 | grep -i "entry" || true
+            echo "::error::Keystore decoded, but RELEASE_KEYSTORE_PASSWORD or RELEASE_KEY_ALIAS does not match it (see keytool output above)."
             exit 1
           fi
           echo "path=$ks" >> "$GITHUB_OUTPUT"
