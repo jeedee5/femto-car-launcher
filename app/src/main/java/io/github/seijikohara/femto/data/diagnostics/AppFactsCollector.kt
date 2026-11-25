@@ -3,6 +3,7 @@ package io.github.seijikohara.femto.data.diagnostics
 import android.app.ActivityManager
 import android.app.ApplicationExitInfo
 import android.content.Context
+import android.os.Build
 import androidx.core.content.getSystemService
 import io.github.seijikohara.femto.BuildConfig
 import io.github.seijikohara.femto.data.update.UpdateChannel
@@ -163,6 +164,12 @@ internal class AppFactsCollector(
 
     suspend fun crashHistory(): SectionPayload.Facts =
         withContext(Dispatchers.IO) {
+            // ApplicationExitInfo is API 30+; Android 10 has no exit history.
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+                return@withContext SectionPayload.Facts(
+                    listOf(DiagnosticFact("Exit history", FactValue.Text("unavailable before Android 11"))),
+                )
+            }
             val exitInfos =
                 context
                     .getSystemService<ActivityManager>()

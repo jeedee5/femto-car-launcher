@@ -2,12 +2,16 @@ package io.github.seijikohara.femto.data.diagnostics
 
 import android.content.Context
 import android.content.res.Configuration
+import android.graphics.Point
+import android.graphics.Rect
 import android.hardware.display.DisplayManager
+import android.os.Build
 import android.provider.Settings
 import android.util.DisplayMetrics
 import android.view.Display
 import android.view.WindowInsets
 import android.view.WindowManager
+import androidx.annotation.RequiresApi
 import androidx.core.content.getSystemService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -124,8 +128,21 @@ internal class DisplayFactsCollector(
             // WindowManager.currentWindowMetrics/maximumWindowMetrics.
             val displayContext = context.createDisplayContext(display)
             val windowManager = displayContext.getSystemService<WindowManager>()!!
-            val current = windowManager.currentWindowMetrics
-            val maximum = windowManager.maximumWindowMetrics
+            // WindowMetrics is API 30+; Android 10 reads the same sizes from Display.
+            val current =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    windowManager.currentWindowMetrics.bounds
+                } else {
+                    @Suppress("DEPRECATION")
+                    Point().also { display.getSize(it) }.let { Rect(0, 0, it.x, it.y) }
+                }
+            val maximum =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    windowManager.maximumWindowMetrics.bounds
+                } else {
+                    @Suppress("DEPRECATION")
+                    Point().also { display.getRealSize(it) }.let { Rect(0, 0, it.x, it.y) }
+                }
             val metrics = displayContext.resources.displayMetrics
             val configuration = displayContext.resources.configuration
 
@@ -133,15 +150,15 @@ internal class DisplayFactsCollector(
                 buildList {
                     addAll(
                         displayGeometryFacts(
-                            boundsPx = "${current.bounds.width()}x${current.bounds.height()}",
-                            maxBoundsPx = "${maximum.bounds.width()}x${maximum.bounds.height()}",
+                            boundsPx = "${current.width()}x${current.height()}",
+                            maxBoundsPx = "${maximum.width()}x${maximum.height()}",
                             densityDpi = metrics.densityDpi,
                             stableDensityDpi = DisplayMetrics.DENSITY_DEVICE_STABLE,
                             density = metrics.density,
                             xdpi = metrics.xdpi,
                             ydpi = metrics.ydpi,
-                            widthPx = maximum.bounds.width(),
-                            heightPx = maximum.bounds.height(),
+                            widthPx = maximum.width(),
+                            heightPx = maximum.height(),
                             screenWidthDp = configuration.screenWidthDp,
                             screenHeightDp = configuration.screenHeightDp,
                             smallestScreenWidthDp = configuration.smallestScreenWidthDp,
@@ -175,7 +192,13 @@ internal class DisplayFactsCollector(
                             FactValue.Text("${display.isHdr} / ${configuration.isScreenWideColorGamut}"),
                         ),
                     )
-                    add(cutoutInsetsFact(current.windowInsets))
+                    add(
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            cutoutInsetsFact(windowManager.currentWindowMetrics.windowInsets)
+                        } else {
+                            DiagnosticFact("Cutout / insets", FactValue.Text("unavailable before Android 11"))
+                        },
+                    )
                     add(
                         DiagnosticFact(
                             "Displays",
@@ -194,6 +217,7 @@ internal class DisplayFactsCollector(
             )
         }
 
+    @RequiresApi(Build.VERSION_CODES.R)
     private fun cutoutInsetsFact(windowInsets: WindowInsets): DiagnosticFact {
         val statusBarInsets = windowInsets.getInsets(WindowInsets.Type.statusBars())
         val navBarInsets = windowInsets.getInsets(WindowInsets.Type.navigationBars())

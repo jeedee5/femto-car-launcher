@@ -9,8 +9,10 @@ import android.content.pm.PermissionInfo
 import android.os.PowerManager
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.getSystemService
+import io.github.seijikohara.femto.data.common.getPackageInfoCompat
 import io.github.seijikohara.femto.data.common.hasInstallUnknownAppsAccess
 import io.github.seijikohara.femto.data.common.holdsHomeRole
+import io.github.seijikohara.femto.data.common.resolveActivityCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -56,9 +58,9 @@ internal class PermissionFactsCollector(
         withContext(Dispatchers.IO) {
             val packageManager = context.packageManager
             val packageInfo =
-                packageManager.getPackageInfo(
+                packageManager.getPackageInfoCompat(
                     context.packageName,
-                    PackageManager.PackageInfoFlags.of(PackageManager.GET_PERMISSIONS.toLong()),
+                    PackageManager.GET_PERMISSIONS,
                 )
             val requested = packageInfo.requestedPermissions
             val dangerous = requested.orEmpty().filter { it.isDangerousPermission(packageManager) }.toSet()
@@ -103,9 +105,9 @@ internal class PermissionFactsCollector(
         val held = context.holdsHomeRole()
         val defaultPackage =
             context.packageManager
-                .resolveActivity(
+                .resolveActivityCompat(
                     Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME),
-                    PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong()),
+                    PackageManager.MATCH_DEFAULT_ONLY,
                 )?.activityInfo
                 ?.packageName
         val heldLabel = if (held) "held" else "not held"

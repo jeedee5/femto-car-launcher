@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.hardware.display.DisplayManager
 import android.os.BatteryManager
+import android.os.Build
 import android.os.Debug
 import android.os.PowerManager
 import android.os.Process
@@ -170,12 +171,17 @@ internal class PerformanceFactsCollector(
         val thermal = power?.currentThermalStatus.toThermalLevel()
         // Locale.ROOT keeps the decimal point: the report's grep-stable
         // wording contract must hold on comma-decimal devices too.
+        // getThermalHeadroom is API 30+; Android 10 reports the status alone.
         val headroom =
-            power
-                ?.getThermalHeadroom(HEADROOM_FORECAST_SECONDS)
-                ?.takeIf { it.isFinite() }
-                ?.let { " (headroom %.2f)".format(Locale.ROOT, it) }
-                .orEmpty()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                power
+                    ?.getThermalHeadroom(HEADROOM_FORECAST_SECONDS)
+                    ?.takeIf { it.isFinite() }
+                    ?.let { " (headroom %.2f)".format(Locale.ROOT, it) }
+                    .orEmpty()
+            } else {
+                ""
+            }
         return DiagnosticFact(
             "Thermal",
             FactValue.Status(

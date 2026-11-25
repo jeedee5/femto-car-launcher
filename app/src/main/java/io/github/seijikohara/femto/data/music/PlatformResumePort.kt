@@ -4,7 +4,6 @@ import android.app.ActivityManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.database.ContentObserver
 import android.media.AudioManager
 import android.media.browse.MediaBrowser
@@ -19,6 +18,7 @@ import android.provider.Settings
 import android.service.media.MediaBrowserService
 import android.util.Log
 import androidx.core.content.getSystemService
+import io.github.seijikohara.femto.data.common.queryIntentServicesCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -160,9 +160,8 @@ internal class PlatformResumePort(
     private fun browserServiceOrNull(packageName: String): ComponentName? =
         runCatching {
             context.packageManager
-                .queryIntentServices(
+                .queryIntentServicesCompat(
                     Intent(MediaBrowserService.SERVICE_INTERFACE).setPackage(packageName),
-                    PackageManager.ResolveInfoFlags.of(0),
                 ).firstOrNull()
                 ?.serviceInfo
                 ?.let { ComponentName(it.packageName, it.name) }

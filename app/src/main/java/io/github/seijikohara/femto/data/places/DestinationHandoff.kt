@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.core.net.toUri
+import io.github.seijikohara.femto.data.common.queryIntentActivitiesCompat
+import io.github.seijikohara.femto.data.common.resolveActivityCompat
 
 /**
  * Return the implicit intent that hands [target] to whichever app handles
@@ -121,16 +123,16 @@ private class PackageManagerGeoLookup(
     private val packageManager: PackageManager,
     private val intent: Intent,
 ) : GeoHandlerLookup {
-    private val defaultOnly = PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong())
+    private val defaultOnly = PackageManager.MATCH_DEFAULT_ONLY
 
     override fun handlers(): List<AppActivity> =
         packageManager
-            .queryIntentActivities(intent, defaultOnly)
+            .queryIntentActivitiesCompat(intent, defaultOnly)
             .map { AppActivity(it.activityInfo.packageName, it.activityInfo.name) }
 
     override fun resolvedOrNull(): AppActivity? =
         packageManager
-            .resolveActivity(intent, defaultOnly)
+            .resolveActivityCompat(intent, defaultOnly)
             ?.activityInfo
             ?.let { AppActivity(it.packageName, it.name) }
 }

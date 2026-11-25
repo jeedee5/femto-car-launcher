@@ -560,8 +560,22 @@ internal fun AudioManager.dispatchPlayMediaKey() {
  * still resumable and must stay on the card, so the plain [PlaybackState.isActive]
  * check (which excludes STATE_PAUSED) is not enough here.
  */
-internal fun PlaybackState?.isPlayingOrPaused(): Boolean =
-    this != null && (isActive() || state == PlaybackState.STATE_PAUSED)
+internal fun PlaybackState?.isPlayingOrPaused(): Boolean = this != null && state in PLAYING_OR_PAUSED_STATES
+
+// PlaybackState.isActive() is API 31+; this is its state set (AOSP) plus
+// STATE_PAUSED, spelled out so the check also runs on Android 10-11.
+private val PLAYING_OR_PAUSED_STATES =
+    setOf(
+        PlaybackState.STATE_PLAYING,
+        PlaybackState.STATE_PAUSED,
+        PlaybackState.STATE_BUFFERING,
+        PlaybackState.STATE_CONNECTING,
+        PlaybackState.STATE_FAST_FORWARDING,
+        PlaybackState.STATE_REWINDING,
+        PlaybackState.STATE_SKIPPING_TO_NEXT,
+        PlaybackState.STATE_SKIPPING_TO_PREVIOUS,
+        PlaybackState.STATE_SKIPPING_TO_QUEUE_ITEM,
+    )
 
 /**
  * Return `true` when the state is PLAYING. The other half of the pair the card

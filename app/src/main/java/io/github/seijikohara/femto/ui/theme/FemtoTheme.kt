@@ -1,5 +1,6 @@
 package io.github.seijikohara.femto.ui.theme
 
+import android.os.Build
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -90,6 +91,12 @@ fun FemtoTheme(
             inPreview && darkTheme -> DarkFallback
 
             inPreview -> LightFallback
+
+            // Material You wallpaper colors exist only from Android 12 (API 31);
+            // older head units get the static fallback palette instead.
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.S && darkTheme -> DarkFallback
+
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.S -> LightFallback
 
             darkTheme -> dynamicDarkColorScheme(context)
 

@@ -135,7 +135,7 @@ android {
 
     defaultConfig {
         applicationId = "io.github.seijikohara.femto"
-        minSdk = 33
+        minSdk = 29
         targetSdk = 36
         // CI injects versionCode/versionName: .github/actions/app-version
         // computes the date version for both channels, and the nightly and
@@ -168,7 +168,9 @@ android {
         // local build never sets it, so it stays versionCode 1 / debug-signed and
         // must never see "update available" — it would find one and then fail the
         // signature check against the downloaded release APK.
-        buildConfigField("boolean", "UPDATE_CHECK_ENABLED", "${versionCodeEnv != null}")
+        // android10 fork: the in-app updater follows upstream releases (minSdk 33,
+        // different signing key), so it stays off; updates come from the fork's releases.
+        buildConfigField("boolean", "UPDATE_CHECK_ENABLED", "false")
 
         // The native renderer ships only where a Vulkan driver realistically
         // exists: 64-bit ARM devices and the x86_64 emulator. Any other ABI

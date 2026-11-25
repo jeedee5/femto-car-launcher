@@ -38,6 +38,7 @@ import io.github.seijikohara.femto.data.apps.AppsRepository
 import io.github.seijikohara.femto.data.common.hasBluetoothConnectPermission
 import io.github.seijikohara.femto.data.common.hasReadCalendarPermission
 import io.github.seijikohara.femto.data.common.hasReadPhoneStatePermission
+import io.github.seijikohara.femto.data.common.resolveActivityCompat
 import io.github.seijikohara.femto.data.display.AssistantLaunchSetting
 import io.github.seijikohara.femto.data.display.ClockSetting
 import io.github.seijikohara.femto.data.display.DisplayPreferences
@@ -566,7 +567,7 @@ class MainActivity : ComponentActivity() {
      */
     private fun launchSystemAssistant(): Boolean =
         assistantIntent(AssistantOption.ASSISTANT).let { intent ->
-            packageManager.resolveActivity(intent, PackageManager.ResolveInfoFlags.of(0)) != null &&
+            packageManager.resolveActivityCompat(intent) != null &&
                 tryStartActivity(intent)
         }
 

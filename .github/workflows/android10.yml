@@ -1,0 +1,176 @@
+name: Android 10 build
+
+# Fork-only workflow for the `android10` branch: keeps the branch merged with
+# upstream develop, refuses to ship if lint finds an API the Android 10 floor
+# (minSdk 29) lacks, and publishes a signed APK as a GitHub release.
+#
+# Required repository secrets (Settings > Secrets and variables > Actions):
+#   RELEASE_KEYSTORE_BASE64  base64 of the .jks keystore
+#   RELEASE_KEYSTORE_PASSWORD
+#   RELEASE_KEY_ALIAS
+#   RELEASE_KEY_PASSWORD
+# A stable key is what lets each new APK install over the previous one.
+
+on:
+  schedule:
+    - cron: "17 4 * * *"
+  push:
+    branches: [android10]
+    paths-ignore: ["**.md", "docs/**"]
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Build and release even when nothing changed"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: android10
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: https://github.com/seijikohara/femto-car-launcher.git
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout android10
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: android10
+          fetch-depth: 0
+
+      - name: Merge upstream develop
+        id: sync
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "$UPSTREAM"
+          git fetch --no-tags upstream develop
+          before=$(git rev-parse HEAD)
+          # A plain merge, never -X theirs: a conflict must stop the run rather
+          # than silently drop an Android 10 fix.
+          if ! git merge --no-edit upstream/develop; then
+            git merge --abort
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          after=$(git rev-parse HEAD)
+          echo "changed=$([ "$before" != "$after" ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          echo "upstream=$(git rev-parse --short upstream/develop)" >> "$GITHUB_OUTPUT"
+
+      - name: Decide whether to build
+        id: gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head=$(git rev-parse HEAD)
+          last=$(gh release list --limit 1 --json tagName --jq '.[0].tagName // ""')
+          built=""
+          [ -n "$last" ] && built=$(gh release view "$last" --json body --jq .body | sed -n 's/^Commit: //p')
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$head" = "$built" ]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing new since $last"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force }}" != "true" ] && [ "$head" = "$built" ]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing new since $last (use force to rebuild)"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up JDK 25
+        if: steps.gate.outputs.build == 'true'
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Set up Gradle
+        if: steps.gate.outputs.build == 'true'
+        uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
+        with:
+          cache-read-only: false
+
+      - name: Version
+        if: steps.gate.outputs.build == 'true'
+        id: version
+        shell: bash
+        run: |
+          # yyMMddHHmm/10 stays below Int.MAX and only ever increases.
+          code=$(( $(date -u +%y%m%d%H%M) / 10 ))
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "name=android10-$(date -u +%Y.%m.%d)-${{ steps.sync.outputs.upstream }}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore signing key
+        if: steps.gate.outputs.build == 'true'
+        id: signing
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "::error::RELEASE_KEYSTORE_BASE64 secret is missing; see the header of this workflow."
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "path=$RUNNER_TEMP/release.jks" >> "$GITHUB_OUTPUT"
+
+      - name: Lint (API 29 floor) and build
+        if: steps.gate.outputs.build == 'true'
+        env:
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+          VERSION_NAME: ${{ steps.version.outputs.name }}
+          RELEASE_KEYSTORE_PATH: ${{ steps.signing.outputs.path }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: ./gradlew lintStableRelease assembleStableRelease --stacktrace
+
+      - name: Upload lint report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-report
+          path: app/build/reports/lint-results-*.html
+          if-no-files-found: ignore
+
+      - name: Push merged branch
+        if: steps.gate.outputs.build == 'true' && steps.sync.outputs.changed == 'true'
+        run: git push origin HEAD:android10
+
+      - name: Publish release
+        if: steps.gate.outputs.build == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          apk=$(ls app/build/outputs/apk/stable/release/*.apk | head -1)
+          name="${{ steps.version.outputs.name }}"
+          cp "$apk" "femto-car-launcher-$name.apk"
+          gh release create "v${{ steps.version.outputs.code }}" "femto-car-launcher-$name.apk" \
+            --target "$(git rev-parse HEAD)" \
+            --title "$name" \
+            --notes "Android 10+ (API 29) build of upstream develop ${{ steps.sync.outputs.upstream }}.
+          Commit: $(git rev-parse HEAD)"
+
+      - name: Open an issue on failure
+        if: failure() && github.event_name == 'schedule'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          reason="build or lint failed"
+          [ "${{ steps.sync.outputs.conflict }}" = "true" ] && reason="merge conflict with upstream develop"
+          gh issue create --title "android10 nightly: $reason" \
+            --body "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          Lint failures usually mean upstream added an API newer than Android 10; the lint-report artifact names the call site." || true

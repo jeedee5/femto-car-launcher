@@ -391,6 +391,10 @@ internal class SystemStatusRepository(
                 }
             }
         }
+            // The pre-API-31 PhoneStateListener binds to the constructing thread's
+            // Looper and throws on a Looper-less Default worker, so the
+            // registration runs on Main (the callback body only calls trySend).
+            .flowOn(Dispatchers.Main)
 
     // Combine the reception flag with the satellite count so the dock renders
     // both from one [SystemStatus] slot. combine emits once both sources have

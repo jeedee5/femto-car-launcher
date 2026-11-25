@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.media.MediaMetadata
 import android.media.session.PlaybackState
+import io.github.seijikohara.femto.data.common.getApplicationInfoCompat
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -93,7 +94,7 @@ internal class PackageManagerMediaApps(
         runCatching {
             context.packageManager.run {
                 getApplicationLabel(
-                    getApplicationInfo(packageName, PackageManager.ApplicationInfoFlags.of(0)),
+                    getApplicationInfoCompat(packageName),
                 ).toString()
             }
         }.getOrNull()
