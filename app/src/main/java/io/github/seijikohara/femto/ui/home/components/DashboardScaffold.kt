@@ -62,6 +62,7 @@ import io.github.seijikohara.femto.ui.home.HomeAction
 import io.github.seijikohara.femto.ui.home.HomeUiState
 import io.github.seijikohara.femto.ui.locale.SpeedUnit
 import io.github.seijikohara.femto.ui.locale.TemperatureUnit
+import io.github.seijikohara.femto.ui.musicsources.MusicSourcesPanel
 import io.github.seijikohara.femto.ui.theme.FemtoDimens
 import io.github.seijikohara.femto.ui.theme.FemtoTheme
 import io.github.seijikohara.femto.ui.theme.Motion
@@ -1494,6 +1495,17 @@ private fun FloatingCardColumn(
         // The music card sizes to its own content height (no weight): the row above
         // takes all the remaining column height, so no space is left as an empty band
         // and the card never stretches past its content on a tall display.
+        // Fork addition: one-tap music sources, self-hiding when switched off in Settings.
+        MusicSourcesPanel(
+            hazeState = hazeState,
+            glassConfig = glassConfig,
+            playingPackage =
+                (uiState.musicState as? MusicCardState.Playing)
+                    ?.nowPlaying
+                    ?.takeIf { it.isPlaying }
+                    ?.packageName,
+            modifier = Modifier.fillMaxWidth(),
+        )
         if (panels.music) music(Modifier.fillMaxWidth())
     }
 }

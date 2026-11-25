@@ -34,6 +34,7 @@ import com.composables.icons.lucide.FolderOpen
 import com.composables.icons.lucide.Lucide
 import io.github.seijikohara.femto.R
 import io.github.seijikohara.femto.data.calendar.CalendarInfo
+import io.github.seijikohara.femto.ui.musicsources.MusicSourcesSwitch
 import io.github.seijikohara.femto.ui.settings.SettingsAction
 import io.github.seijikohara.femto.ui.settings.SettingsUiState
 import io.github.seijikohara.femto.ui.settings.VideoFileSummary
@@ -101,6 +102,18 @@ internal fun PanelsSection(
                 onCheckedChange = { onAction(SettingsAction.SetShowMusic(it)) },
                 shapes = shapes,
             )
+        }
+        // Fork addition: the music sources panel keeps its own store, so the row reads it directly.
+        item { shapes ->
+            MusicSourcesSwitch { checked, onCheckedChange ->
+                SwitchRow(
+                    title = stringResource(R.string.settings_group_panel_music_sources),
+                    checked = checked,
+                    onCheckedChange = onCheckedChange,
+                    shapes = shapes,
+                    summary = stringResource(R.string.settings_panel_music_sources_desc),
+                )
+            }
         }
         item { shapes ->
             SwitchRow(

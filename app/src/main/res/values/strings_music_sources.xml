@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Music sources panel (fork addition), kept in its own file so upstream string changes never conflict with it. -->
+<resources>
+    <string name="music_sources_empty">Tap + to add your music apps here</string>
+    <string name="music_sources_edit">Choose music apps</string>
+    <string name="music_sources_play">Play %1$s</string>
+    <string name="music_sources_picker_title">Music apps on the dashboard</string>
+    <string name="settings_group_panel_music_sources">Music sources</string>
+    <string name="settings_panel_music_sources_desc">One-tap shortcuts to your music apps and the last one played</string>
+</resources>

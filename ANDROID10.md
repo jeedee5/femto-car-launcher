@@ -18,6 +18,10 @@ head units (tested target: UIS8581A / SC9863A, MCU ZA001, real API 29).
 Part of the compat work comes from
 [Liga1231/femto-car-launcher-ru](https://github.com/Liga1231/femto-car-launcher-ru) (commit `0584f30`).
 
+## Fork additions
+
+- **Music sources panel** (`ui/musicsources/`, `data/music/MusicSources.kt`): a dashboard panel above the music card with one-tap shortcuts to the music apps you pick (pencil/+ button) plus the app that played last (marked with a dot). A tap pauses the current player, then starts the chosen app in the background through the launcher's resume chain; apps without a media browser service (a head unit's radio or Bluetooth music) are opened instead. Toggle under Settings → Panels → Music sources. Kept in its own files so upstream merges stay conflict-free; the only hooks are one call in `DashboardScaffold.kt` and one row in `PanelsSection.kt`.
+
 ## Device requirements
 
 - Android System WebView 101 or newer for the map. Stock UIS8581A firmware ships
