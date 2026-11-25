@@ -147,7 +147,13 @@ jobs:
           {
             echo "RELEASE_KEYSTORE_PASSWORD=$STORE_PASSWORD"
             echo "RELEASE_KEY_ALIAS=$KEY_ALIAS"
-            echo "RELEASE_KEY_PASSWORD=$(printf '%s' "$KEY_PASSWORD" | tr -d '\r\n')"
+            # PKCS12 (keytool's default since JDK 9) has a single password for store
+            # and key, so the store password is the only one that can work there.
+            if keytool -list -keystore "$ks" -storepass "$STORE_PASSWORD" 2>/dev/null | grep -qi "type: PKCS12"; then
+              echo "RELEASE_KEY_PASSWORD=$STORE_PASSWORD"
+            else
+              echo "RELEASE_KEY_PASSWORD=$(printf '%s' "${KEY_PASSWORD:-$STORE_PASSWORD}" | tr -d '\r\n')"
+            fi
           } >> "$GITHUB_ENV"
 
       - name: Lint (API 29 floor) and build
