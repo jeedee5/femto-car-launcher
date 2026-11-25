@@ -7,7 +7,7 @@ name: Android 10 build
 # Required repository secrets (Settings > Secrets and variables > Actions):
 #   RELEASE_KEYSTORE_BASE64  base64 of the .jks keystore
 #   RELEASE_KEYSTORE_PASSWORD
-#   RELEASE_KEY_ALIAS
+#   RELEASE_KEY_ALIAS        (a secret or a repository variable)
 #   RELEASE_KEY_PASSWORD
 # A stable key is what lets each new APK install over the previous one.
 
@@ -117,7 +117,7 @@ jobs:
         env:
           KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           STORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS || vars.RELEASE_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
           if [ -z "$KEYSTORE_B64" ]; then
