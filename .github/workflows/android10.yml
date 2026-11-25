@@ -158,7 +158,36 @@ jobs:
           RELEASE_KEYSTORE_PATH: ${{ steps.signing.outputs.path }}
           # RELEASE_KEYSTORE_PASSWORD / RELEASE_KEY_ALIAS / RELEASE_KEY_PASSWORD come
           # from GITHUB_ENV, written by "Restore signing key".
-        run: ./gradlew lintStableRelease assembleStableRelease --stacktrace
+        shell: bash
+        run: |
+          set -o pipefail
+          ./gradlew lintStableRelease assembleStableRelease --stacktrace 2>&1 | tee "$RUNNER_TEMP/build.log"
+
+      # The build log and lint report also go to the `ci-logs` branch, so they can
+      # be read with plain git where the Actions API is not reachable.
+      - name: Publish failure logs to ci-logs branch
+        if: failure()
+        shell: bash
+        run: |
+          set -u
+          dir="$RUNNER_TEMP/ci-logs"
+          git worktree add --detach "$dir" > /dev/null 2>&1 || { mkdir -p "$dir"; git -C "$dir" init -q; }
+          cd "$dir"
+          git checkout -q --orphan ci-logs-new
+          git rm -rq --cached . > /dev/null 2>&1 || true
+          find . -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
+          cp "$RUNNER_TEMP/build.log" build.log 2>/dev/null || echo "no gradle log (failed before the build step)" > build.log
+          cp "$GITHUB_WORKSPACE"/app/build/reports/lint-results-*.xml . 2>/dev/null || true
+          cp "$GITHUB_WORKSPACE"/app/build/reports/lint-results-*.txt . 2>/dev/null || true
+          {
+            echo "run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "commit: $(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)"
+            echo "date: $(date -u +%FT%TZ)"
+          } > RUN.txt
+          git add -A
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -qm "CI failure logs for run ${{ github.run_id }}"
+          git push -qf origin HEAD:refs/heads/ci-logs
 
       - name: Upload lint report
         if: failure()
