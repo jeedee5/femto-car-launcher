@@ -3,6 +3,7 @@ package io.github.seijikohara.femto.data.geocoding
 import android.content.Context
 import android.location.Address
 import android.location.Geocoder
+import android.os.Build
 import android.util.Log
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -56,22 +57,32 @@ internal class PlatformPlaceLocator(
         } else {
             withContext(ioDispatcher) {
                 runCatching {
-                    suspendCancellableCoroutine { continuation ->
-                        // The minSdk-33 listener form; the blocking overload is deprecated from API 33.
-                        Geocoder(appContext, localeProvider()).getFromLocationName(
-                            text,
-                            1,
-                            object : Geocoder.GeocodeListener {
-                                override fun onGeocode(addresses: MutableList<Address>) {
-                                    continuation.resume(addresses.firstOrNull()?.toLookup() ?: PlaceLookup.NotFound)
-                                }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        suspendCancellableCoroutine<PlaceLookup> { continuation ->
+                            // The API 33+ listener form; the blocking overload is deprecated from API 33.
+                            Geocoder(appContext, localeProvider()).getFromLocationName(
+                                text,
+                                1,
+                                object : Geocoder.GeocodeListener {
+                                    override fun onGeocode(addresses: MutableList<Address>) {
+                                        continuation.resume(addresses.firstOrNull()?.toLookup() ?: PlaceLookup.NotFound)
+                                    }
 
-                                override fun onError(errorMessage: String?) {
-                                    Log.w(TAG, "geocode error: $errorMessage")
-                                    continuation.resume(PlaceLookup.Failed)
-                                }
-                            },
-                        )
+                                    override fun onError(errorMessage: String?) {
+                                        Log.w(TAG, "geocode error: $errorMessage")
+                                        continuation.resume(PlaceLookup.Failed)
+                                    }
+                                },
+                            )
+                        }
+                    } else {
+                        // Android 10-12 only have the blocking overload; this already runs on ioDispatcher.
+                        @Suppress("DEPRECATION")
+                        Geocoder(appContext, localeProvider())
+                            .getFromLocationName(text, 1)
+                            ?.firstOrNull()
+                            ?.toLookup()
+                            ?: PlaceLookup.NotFound
                     }
                 }.getOrElse { error ->
                     if (error is CancellationException) throw error

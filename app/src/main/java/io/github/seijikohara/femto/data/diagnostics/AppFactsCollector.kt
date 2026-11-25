@@ -3,6 +3,7 @@ package io.github.seijikohara.femto.data.diagnostics
 import android.app.ActivityManager
 import android.app.ApplicationExitInfo
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.getSystemService
 import io.github.seijikohara.femto.BuildConfig
@@ -146,7 +147,7 @@ internal class AppFactsCollector(
                         DiagnosticFact(
                             "Installer",
                             FactValue.Text(
-                                packageManager.getInstallSourceInfo(context.packageName).installingPackageName
+                                installerPackageNameOrNull(packageManager, context.packageName)
                                     ?: "sideload/unknown",
                             ),
                         ),
@@ -160,6 +161,18 @@ internal class AppFactsCollector(
                     )
                 },
             )
+        }
+
+    // getInstallSourceInfo is API 30+; Android 10 only has the deprecated getter.
+    private fun installerPackageNameOrNull(
+        packageManager: PackageManager,
+        packageName: String,
+    ): String? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            packageManager.getInstallSourceInfo(packageName).installingPackageName
+        } else {
+            @Suppress("DEPRECATION")
+            packageManager.getInstallerPackageName(packageName)
         }
 
     suspend fun crashHistory(): SectionPayload.Facts =

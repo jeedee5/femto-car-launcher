@@ -1,6 +1,8 @@
 package io.github.seijikohara.femto.data.map.offline
 
 import android.util.Log
+import io.github.seijikohara.femto.data.common.readInto
+import io.github.seijikohara.femto.data.common.readUpTo
 import java.io.ByteArrayInputStream
 import java.util.zip.GZIPInputStream
 
@@ -28,7 +30,7 @@ internal object ShortbreadConverter {
         runCatching {
             if (tile.size >= 2 && tile[0] == GZIP_MAGIC_FIRST && tile[1] == GZIP_MAGIC_SECOND) {
                 inflateSizedOrNull(tile)
-                    ?: GZIPInputStream(ByteArrayInputStream(tile)).use { it.readNBytes(MAX_RAW_TILE_BYTES + 1) }
+                    ?: GZIPInputStream(ByteArrayInputStream(tile)).use { it.readUpTo(MAX_RAW_TILE_BYTES + 1) }
             } else {
                 tile
             }
@@ -50,7 +52,7 @@ internal object ShortbreadConverter {
         if (hint < 1 || hint > MAX_RAW_TILE_BYTES || hint > tile.size * DEFLATE_MAX_RATIO) return null
         val out = ByteArray(hint.toInt())
         return GZIPInputStream(ByteArrayInputStream(tile), INFLATE_BUFFER_BYTES).use { stream ->
-            out.takeIf { stream.readNBytes(it, 0, it.size) == it.size && stream.read() == -1 }
+            out.takeIf { stream.readInto(it, 0, it.size) == it.size && stream.read() == -1 }
         }
     }
 

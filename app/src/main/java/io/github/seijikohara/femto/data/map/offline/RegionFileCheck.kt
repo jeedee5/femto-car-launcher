@@ -1,6 +1,7 @@
 package io.github.seijikohara.femto.data.map.offline
 
 import android.database.sqlite.SQLiteDatabase
+import io.github.seijikohara.femto.data.common.readUpTo
 import java.io.File
 
 /** Decides whether a downloaded file is a map database worth keeping. */
@@ -22,7 +23,7 @@ internal val SqliteRegionFileCheck: RegionFileCheck =
     }
 
 private fun hasSqliteHeader(file: File): Boolean =
-    file.inputStream().use { it.readNBytes(SqliteHeader.size) }.contentEquals(SqliteHeader)
+    file.inputStream().use { it.readUpTo(SqliteHeader.size) }.contentEquals(SqliteHeader)
 
 private fun hasTilesTable(file: File): Boolean =
     SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY).use { db ->

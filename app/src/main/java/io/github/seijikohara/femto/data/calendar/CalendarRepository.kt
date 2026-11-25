@@ -265,8 +265,8 @@ internal class CalendarRepository(
                         // derived from the system zone. All-day END is the
                         // next-midnight boundary, not a meaningful clock time, so it
                         // goes the same way.
-                        val startTime = if (allDay) null else LocalTime.ofInstant(Instant.ofEpochMilli(startMs), zone)
-                        val endTime = if (allDay) null else LocalTime.ofInstant(Instant.ofEpochMilli(endMs), zone)
+                        val startTime = if (allDay) null else Instant.ofEpochMilli(startMs).atZone(zone).toLocalTime()
+                        val endTime = if (allDay) null else Instant.ofEpochMilli(endMs).atZone(zone).toLocalTime()
                         covered.forEach { date ->
                             byDay.getOrPut(date) { mutableListOf() } +=
                                 EventItem(
