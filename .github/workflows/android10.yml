@@ -116,13 +116,25 @@ jobs:
         shell: bash
         env:
           KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
         run: |
           if [ -z "$KEYSTORE_B64" ]; then
             echo "::error::RELEASE_KEYSTORE_BASE64 secret is missing; see the header of this workflow."
             exit 1
           fi
-          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
-          echo "path=$RUNNER_TEMP/release.jks" >> "$GITHUB_OUTPUT"
+          ks="$RUNNER_TEMP/release.jks"
+          # Strip whitespace/CRLF a Windows clipboard or a wrapped base64 adds.
+          if ! printf '%s' "$KEYSTORE_B64" | tr -d ' \r\n\t' | base64 -d > "$ks" 2>/dev/null || [ ! -s "$ks" ]; then
+            echo "::error::RELEASE_KEYSTORE_BASE64 is not valid base64 of the .jks file."
+            exit 1
+          fi
+          echo "Decoded keystore: $(stat -c %s "$ks") bytes"
+          if ! keytool -list -keystore "$ks" -storepass "$STORE_PASSWORD" -alias "$KEY_ALIAS" > /dev/null; then
+            echo "::error::Keystore decoded, but RELEASE_KEYSTORE_PASSWORD or RELEASE_KEY_ALIAS does not match it."
+            exit 1
+          fi
+          echo "path=$ks" >> "$GITHUB_OUTPUT"
 
       - name: Lint (API 29 floor) and build
         if: steps.gate.outputs.build == 'true'
