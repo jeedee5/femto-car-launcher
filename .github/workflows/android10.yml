@@ -118,6 +118,7 @@ jobs:
           KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
           STORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
           if [ -z "$KEYSTORE_B64" ]; then
             echo "::error::RELEASE_KEYSTORE_BASE64 secret is missing; see the header of this workflow."
@@ -142,6 +143,12 @@ jobs:
             exit 1
           fi
           echo "path=$ks" >> "$GITHUB_OUTPUT"
+          # Hand the cleaned values to the Gradle step (still masked in logs).
+          {
+            echo "RELEASE_KEYSTORE_PASSWORD=$STORE_PASSWORD"
+            echo "RELEASE_KEY_ALIAS=$KEY_ALIAS"
+            echo "RELEASE_KEY_PASSWORD=$(printf '%s' "$KEY_PASSWORD" | tr -d '\r\n')"
+          } >> "$GITHUB_ENV"
 
       - name: Lint (API 29 floor) and build
         if: steps.gate.outputs.build == 'true'
@@ -149,9 +156,8 @@ jobs:
           VERSION_CODE: ${{ steps.version.outputs.code }}
           VERSION_NAME: ${{ steps.version.outputs.name }}
           RELEASE_KEYSTORE_PATH: ${{ steps.signing.outputs.path }}
-          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
-          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
-          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          # RELEASE_KEYSTORE_PASSWORD / RELEASE_KEY_ALIAS / RELEASE_KEY_PASSWORD come
+          # from GITHUB_ENV, written by "Restore signing key".
         run: ./gradlew lintStableRelease assembleStableRelease --stacktrace
 
       - name: Upload lint report
