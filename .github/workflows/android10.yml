@@ -74,9 +74,9 @@ jobs:
         run: |
           set -euo pipefail
           head=$(git rev-parse HEAD)
-          last=$(gh release list --limit 1 --json tagName --jq '.[0].tagName // ""')
+          last=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1 --json tagName --jq '.[0].tagName // ""')
           built=""
-          [ -n "$last" ] && built=$(gh release view "$last" --json body --jq .body | sed -n 's/^Commit: //p')
+          [ -n "$last" ] && built=$(gh release view "$last" --repo "$GITHUB_REPOSITORY" --json body --jq .body | sed -n 's/^Commit: //p')
           if [ "${{ github.event_name }}" = "schedule" ] && [ "$head" = "$built" ]; then
             echo "build=false" >> "$GITHUB_OUTPUT"
             echo "Nothing new since $last"
@@ -217,7 +217,7 @@ jobs:
           apk=$(ls app/build/outputs/apk/stable/release/*.apk | head -1)
           name="${{ steps.version.outputs.name }}"
           cp "$apk" "femto-car-launcher-$name.apk"
-          gh release create "v${{ steps.version.outputs.code }}" "femto-car-launcher-$name.apk" \
+          gh release create --repo "$GITHUB_REPOSITORY" "v${{ steps.version.outputs.code }}" "femto-car-launcher-$name.apk" \
             --target "$(git rev-parse HEAD)" \
             --title "$name" \
             --notes "Android 10+ (API 29) build of upstream develop ${{ steps.sync.outputs.upstream }}.
@@ -231,6 +231,6 @@ jobs:
         run: |
           reason="build or lint failed"
           [ "${{ steps.sync.outputs.conflict }}" = "true" ] && reason="merge conflict with upstream develop"
-          gh issue create --title "android10 nightly: $reason" \
+          gh issue create --repo "$GITHUB_REPOSITORY" --title "android10 nightly: $reason" \
             --body "Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           Lint failures usually mean upstream added an API newer than Android 10; the lint-report artifact names the call site." || true
