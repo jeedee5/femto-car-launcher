@@ -6,6 +6,7 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
+import io.github.seijikohara.femto.data.common.queryIntentServicesCompat
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -162,9 +163,9 @@ internal class PlatformSpeechEnginePort(
     // The same query the platform lists engines with, so this list is the one TextToSpeech would connect to.
     private fun services(): List<SpeechService> =
         context.packageManager
-            .queryIntentServices(
+            .queryIntentServicesCompat(
                 Intent(TextToSpeech.Engine.INTENT_ACTION_TTS_SERVICE),
-                PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong()),
+                PackageManager.MATCH_DEFAULT_ONLY,
             ).map { resolved ->
                 SpeechService(
                     packageName = resolved.serviceInfo.packageName,
