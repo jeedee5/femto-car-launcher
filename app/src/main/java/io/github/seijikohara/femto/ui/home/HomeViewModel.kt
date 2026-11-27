@@ -51,12 +51,14 @@ import io.github.seijikohara.femto.data.routing.ActiveRoute
 import io.github.seijikohara.femto.data.routing.ActiveRouteStore
 import io.github.seijikohara.femto.data.routing.FollowEvent
 import io.github.seijikohara.femto.data.routing.NavigationPreferences
+import io.github.seijikohara.femto.data.routing.NavigationSettings
 import io.github.seijikohara.femto.data.routing.RerouteStatus
 import io.github.seijikohara.femto.data.routing.Rerouter
+import io.github.seijikohara.femto.data.routing.Route
 import io.github.seijikohara.femto.data.routing.RouteFix
 import io.github.seijikohara.femto.data.routing.RoutePersistence
 import io.github.seijikohara.femto.data.routing.RoutePoint
-import io.github.seijikohara.femto.data.routing.RouteRowTime
+import io.github.seijikohara.femto.data.routing.UpcomingTurn
 import io.github.seijikohara.femto.data.routing.followFlow
 import io.github.seijikohara.femto.data.routing.routingAvailableFlow
 import io.github.seijikohara.femto.data.system.SystemStatus
@@ -69,10 +71,13 @@ import io.github.seijikohara.femto.data.update.UpdateState
 import io.github.seijikohara.femto.data.update.offersUpdate
 import io.github.seijikohara.femto.data.update.promptedFor
 import io.github.seijikohara.femto.data.update.skipped
+import io.github.seijikohara.femto.data.voice.TurnSpeaker
 import io.github.seijikohara.femto.data.weather.MetNorwayApi
 import io.github.seijikohara.femto.data.weather.WeatherRepository
 import io.github.seijikohara.femto.data.weather.WeatherSnapshot
 import io.github.seijikohara.femto.ui.home.components.AppsBarShortcut
+import io.github.seijikohara.femto.ui.locale.SpeedUnit
+import io.github.seijikohara.femto.ui.locale.resolved
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -91,6 +96,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
@@ -168,12 +174,31 @@ internal class HomeViewModel(
     // Where a place another app sent waits for the dashboard. Defaults to an
     // inbox of its own, so previews and tests receive nothing.
     private val receivedPlaces: ReceivedPlaceInbox = ReceivedPlaceInbox(),
-    // Which time the speed readout's route row shows (Settings → Navigation).
-    // Defaults to the arrival time, the row as it was before the setting.
-    routeRowTimeFlow: Flow<RouteRowTime> = flowOf(RouteRowTime.ARRIVAL),
-    // Whether the map draws the vehicle on the route line while it drives
-    // along it (Settings → Navigation). Defaults to on, the setting's default.
-    vehicleOnLineEnabled: Flow<Boolean> = flowOf(true),
+    // The Navigation settings the dashboard reads (Settings → Navigation):
+    // which time the speed readout's route row shows, whether the map draws
+    // the vehicle on the route line while it drives along it, and what the
+    // turn card shows. Defaults to the settings' defaults.
+    navigationSettingsFlow: Flow<NavigationSettings> = flowOf(NavigationSettings.Default),
+    // The speed unit the spoken distances use, resolved from the display
+    // settings the way the dashboard resolves it.
+    speedUnitFlow: Flow<SpeedUnit> = flowOf(SpeedUnit.KILOMETERS_PER_HOUR),
+    // The sentence a turn prompt speaks, in the unit it is spoken in; the
+    // factory reads the app's string resources. The default is empty, as the
+    // default callbacks below never speak it.
+    private val turnPromptText: (TurnPrompt, SpeedUnit) -> String = { _, _ -> "" },
+    // The spoken turn prompts (TurnSpeaker): open the engine for the route
+    // now followed, speak a prompt (with the label diagnostics keep of it),
+    // and close it again. Default to nothing, so previews and tests that do
+    // not exercise voice never reach an engine.
+    private val openTurnVoice: () -> Unit = {},
+    private val speakTurnPrompt: (text: String, label: String) -> Unit = { _, _ -> },
+    private val closeTurnVoice: () -> Unit = {},
+    // True while the speaker cannot speak (TurnSpeaker's status is Unavailable), which takes the control for the
+    // spoken prompts off the turn card; the default speaks. Where routing is off the factory passes the default, so
+    // the speaker is never created there.
+    voiceUnavailableFlow: Flow<Boolean> = flowOf(false),
+    // The write behind the turn card's control: the Spoken prompts setting.
+    private val setSpokenPrompts: suspend (Boolean) -> Unit = {},
 ) : ViewModel() {
     // The builds the update prompt has been answered about in this process. The
     // prompt closes on the answer itself, not on the store's write: a slow disk
@@ -251,6 +276,10 @@ internal class HomeViewModel(
             CoreSignals(location, address, weather, music, badge)
         }
 
+    // The follows started so far; read and written only where flatMapLatest starts one, one after another.
+    private var followCount = 0
+    private var followKey: Pair<Long, Route>? = null
+
     // The active route while routing is offered here, else none: a switch to
     // the Google backend hides it, and a switch back shows it again. Its
     // progress follows each fix along the line (Route.followFlow), a pass
@@ -279,11 +308,26 @@ internal class HomeViewModel(
     // progress back to the start of the line and the off-route watch back to
     // unarmed. The status and the choice card join in beside it: selecting a
     // candidate changes the route, which restarts the follow on the new line.
-    private val activeRoute: Flow<ActiveRouteState?> =
+    // The turns ahead and the off-route verdict ride along for the turn card,
+    // which the settings shape below.
+    private val activeRoute: Flow<FollowedRoute?> =
         combine(activeRouteFlow, routingAvailable) { active, available -> active?.takeIf { available } }
             .distinctUntilChangedBy { it?.session to it?.route }
             .flatMapLatest { active ->
                 active?.let { shown ->
+                    // Numbers the follows, so the prompt planner tells a turn of this one from the same point of
+                    // another (a reroute's line, a new route): a point index alone repeats between them. The same
+                    // route keeps its number when the collection restarts (the dashboard left for longer than the
+                    // grace and reopened): the turns it already announced stay announced.
+                    val followId =
+                        (shown.session to shown.route).let { key ->
+                            if (key == followKey) {
+                                followCount
+                            } else {
+                                followKey = key
+                                ++followCount
+                            }
+                        }
                     combine(
                         shown.route
                             .followFlow(routeFixes)
@@ -296,13 +340,21 @@ internal class HomeViewModel(
                             },
                         activeRouteFlow.map { it.sessionView(shown.session) }.distinctUntilChanged(),
                     ) { follow, view ->
-                        ActiveRouteState(
-                            line = shown.route.points,
-                            progress = follow.progress,
-                            reroute = view.reroute,
-                            choice = view.choice,
-                            alternativeLines = view.alternativeLines,
-                            vehicleOnLine = follow.onLine,
+                        FollowedRoute(
+                            state =
+                                ActiveRouteState(
+                                    line = shown.route.points,
+                                    progress = follow.progress,
+                                    reroute = view.reroute,
+                                    choice = view.choice,
+                                    alternativeLines = view.alternativeLines,
+                                    vehicleOnLine = follow.onLine,
+                                ),
+                            upcomingTurns = follow.upcomingTurns,
+                            offRoute = follow.offRoute,
+                            fixPlaced = follow.fixPlaced,
+                            followId = followId,
+                            speedMetersPerSecond = follow.speedMetersPerSecond,
                         )
                     }
                 } ?: flowOf(null)
@@ -346,22 +398,69 @@ internal class HomeViewModel(
             .distinctUntilChanged()
             .catchAsDefault(TAG, "routing available", false)
 
-    // Seeded with the arrival time for the same reason; the row takes the
-    // stored choice as soon as it is read.
-    private val routeRowTime: Flow<RouteRowTime> =
-        routeRowTimeFlow
-            .onStart { emit(RouteRowTime.ARRIVAL) }
+    // Seeded with null, "not read yet", for the same reason; the dashboard
+    // takes the stored settings as soon as they are read (withSettings).
+    // Applied to the route below, after the follow and outside its restart
+    // keys: switching a setting never restarts the follow, which would put
+    // the progress back to the start of the line. A store that fails reads as
+    // the defaults.
+    private val navigationSettings: Flow<NavigationInput?> =
+        combine(
+            navigationSettingsFlow,
+            voiceUnavailableFlow.onStart { emit(false) }.distinctUntilChanged(),
+            ::NavigationInput,
+        ).map<NavigationInput, NavigationInput?> { it }
+            .onStart { emit(null) }
             .distinctUntilChanged()
-            .catchAsDefault(TAG, "route row time", RouteRowTime.ARRIVAL)
+            .catchAsDefault(TAG, "navigation settings", NavigationInput(NavigationSettings.Default, false))
 
-    // Seeded with the setting's default for the same reason. Applied here,
-    // after the follow, like the row's time: switching it never restarts the
-    // follow, which would put the progress back to the start of the line.
-    private val drawVehicleOnLine: Flow<Boolean> =
-        vehicleOnLineEnabled
-            .onStart { emit(true) }
+    // Seeded with null, "not read yet", like the settings: a prompt never speaks in a unit that was a guess.
+    private val speedUnit: Flow<SpeedUnit?> =
+        speedUnitFlow
+            .map<SpeedUnit, SpeedUnit?> { it }
+            .onStart { emit(null) }
             .distinctUntilChanged()
-            .catchAsDefault(TAG, "vehicle on line", true)
+            .catchAsDefault(TAG, "speed unit", SpeedUnit.KILOMETERS_PER_HOUR)
+
+    // Voice rides on the one collection of the route follow below, the one uiState makes: a second collection of
+    // activeRoute would run the follow twice and report every off-route event twice. These two are touched only from
+    // that collection, one emission after another.
+    private var promptMemory = TurnPromptMemory()
+    private var voiceOpen = false
+
+    // The follow the engine was last opened for: one opening per follow, since a device that cannot speak would
+    // otherwise be asked again at every fix.
+    private var openedFollow = -1
+
+    // Run for each emission of the route as the dashboard shows it. Voice is wanted while a route is followed, the
+    // stored settings are read (with the speed unit), and both the turn card and its spoken prompts are on; then the
+    // engine is opened once for the follow, and a prompt that has come due is spoken. When voice stops being wanted
+    // (a setting off, the route gone) after this view model opened the engine, the engine is closed once; the planner's
+    // memory stays, so a turn that shows again after a hide is not announced a second time. Nothing is sent while
+    // voice was never opened, so a build without routing, and a route that never spoke, never create the speaker.
+    private fun stepTurnVoice(
+        route: FollowedRoute?,
+        card: TurnCardState?,
+        input: NavigationInput?,
+        unit: SpeedUnit?,
+    ) {
+        val stored = input?.settings
+        if (route != null && stored != null && unit != null && stored.turnCard && stored.spokenPrompts) {
+            if (!voiceOpen || openedFollow != route.followId) {
+                voiceOpen = true
+                openedFollow = route.followId
+                openTurnVoice()
+            }
+            promptMemory
+                .step(route.followId, card, route.speedMetersPerSecond)
+                .also { promptMemory = it.memory }
+                .prompt
+                ?.let { prompt -> speakTurnPrompt(turnPromptText(prompt, unit), prompt.label()) }
+        } else if (voiceOpen) {
+            voiceOpen = false
+            closeTurnVoice()
+        }
+    }
 
     val uiState: StateFlow<HomeUiState> =
         combine(
@@ -373,11 +472,20 @@ internal class HomeViewModel(
                 activeRoute,
                 routingOffered,
                 routeChoiceAutoClose,
-                routeRowTime,
-                drawVehicleOnLine,
-            ) { route, offered, _, time, onLine ->
-                route?.copy(rowTime = time, vehicleOnLine = route.vehicleOnLine?.takeIf { onLine }) to offered
-            },
+                navigationSettings,
+                speedUnit,
+            ) { route, offered, _, input, unit ->
+                val shown = route?.withSettings(input)
+                stepTurnVoice(route, shown?.turnCard, input, unit)
+                shown to offered
+            }
+                // The dashboard leaving ends the collection, and the engine goes with it.
+                .onCompletion {
+                    if (voiceOpen) {
+                        voiceOpen = false
+                        closeTurnVoice()
+                    }
+                },
         ) { core, calendar, systemStatus, tripState, (route, offered) ->
             HomeUiState(
                 location = core.location,
@@ -607,6 +715,14 @@ internal class HomeViewModel(
                 clearRoute()
             }
 
+            // The opposite of what the card shows now, and nothing where it shows no control.
+            HomeAction.ToggleSpokenPrompts -> {
+                uiState.value.activeRoute
+                    ?.turnCard
+                    ?.spoken
+                    ?.let { shown -> viewModelScope.launch { setSpokenPrompts(!shown) } }
+            }
+
             // The card on screen names its session, so a tap that lands after a
             // new route has started changes nothing of it.
             is HomeAction.SelectRouteCandidate -> {
@@ -726,6 +842,57 @@ private data class SessionView(
     val choice: RouteChoiceState? = null,
     val alternativeLines: List<List<RoutePoint>> = emptyList(),
 )
+
+// The route as the follow and the session view give it, before the settings
+// shape it: the dashboard's state, and the turns ahead and the off-route
+// verdict the turn card is worked out from.
+private data class FollowedRoute(
+    val state: ActiveRouteState,
+    val upcomingTurns: List<UpcomingTurn>?,
+    val offRoute: Boolean,
+    val fixPlaced: Boolean,
+    // Which follow of the view model's this route is, and how fast the fix it was worked out from moved: what the
+    // spoken prompts read.
+    val followId: Int,
+    val speedMetersPerSecond: Double?,
+)
+
+// The stored Navigation settings with whether the speaker is out: what shapes the route's card, joined in one
+// value so the route's typed combine stays at five flows.
+private data class NavigationInput(
+    val settings: NavigationSettings,
+    val voiceUnavailable: Boolean,
+)
+
+// The route row's time, the vehicle on the line only with its setting on, and
+// the turn card as its three settings shape it, which hides while the choice
+// card is open. Until the [input] (the stored settings) is read the row and the
+// line take the defaults, and the card stays hidden, so a driver who switched
+// it off never sees it flash. The card's spoken-prompts control follows the
+// setting, and is absent where the speaker cannot speak.
+private fun FollowedRoute.withSettings(input: NavigationInput?): ActiveRouteState =
+    (input?.settings ?: NavigationSettings.Default).let { settings ->
+        state.copy(
+            rowTime = settings.routeRowTime,
+            vehicleOnLine = state.vehicleOnLine?.takeIf { settings.vehicleOnRouteLine },
+            turnCard =
+                turnCardStateOrNull(
+                    upcomingTurns = upcomingTurns,
+                    remainingMeters = state.progress.remainingMeters,
+                    fixPlaced = fixPlaced,
+                    offRoute = offRoute,
+                    reroute = state.reroute,
+                    choosing = state.choice != null,
+                    settings =
+                        TurnCardSettings(
+                            show = input != null && settings.turnCard,
+                            showNextAfter = settings.turnCardNextAfter,
+                            showStraight = settings.turnCardStraight,
+                            spoken = settings.spokenPrompts.takeUnless { input?.voiceUnavailable == true },
+                        ),
+                ),
+        )
+    }
 
 private fun ActiveRoute?.sessionView(session: Long): SessionView =
     this
@@ -874,7 +1041,8 @@ internal class HomeViewModelFactory(
         // off the main thread while the dashboard opens. A build without
         // routing only deletes what an earlier build left.
         val routeKeeper = RoutePersistence.get(application).apply { start(enabled = routingEnabled) }
-        val navigationSettings = NavigationPreferences(application).settings
+        val navigationPreferences = NavigationPreferences(application)
+        val navigationSettings = navigationPreferences.settings
 
         @Suppress("UNCHECKED_CAST")
         return HomeViewModel(
@@ -919,8 +1087,22 @@ internal class HomeViewModelFactory(
             closeRouteChoice = { session -> ActiveRouteStore.shared.closeChoice(session) },
             onGpsFix = routeKeeper::onGpsFix,
             receivedPlaces = ReceivedPlaceInbox.shared,
-            routeRowTimeFlow = navigationSettings.map { it.routeRowTime },
-            vehicleOnLineEnabled = navigationSettings.map { it.vehicleOnRouteLine },
+            navigationSettingsFlow = navigationSettings,
+            speedUnitFlow = displayPreferences.settings.map { it.speedUnit.resolved() }.distinctUntilChanged(),
+            turnPromptText = { prompt, unit -> prompt.text(application.resources, unit) },
+            // Resolved at the first call, which only a followed route with voice on can make, so a build without
+            // routing never creates the speaker.
+            openTurnVoice = { TurnSpeaker.get(application).open() },
+            speakTurnPrompt = { text, label -> TurnSpeaker.get(application).say(text, label) },
+            closeTurnVoice = { TurnSpeaker.get(application).close() },
+            // Only in a build with routing, so any other never creates the speaker.
+            voiceUnavailableFlow =
+                if (routingEnabled) {
+                    TurnSpeaker.get(application).cannotSpeak
+                } else {
+                    flowOf(false)
+                },
+            setSpokenPrompts = navigationPreferences::setSpokenPrompts,
         ) as T
     }
 }

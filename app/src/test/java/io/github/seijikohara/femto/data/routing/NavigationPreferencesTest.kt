@@ -27,7 +27,8 @@ class NavigationPreferencesTest {
         }
 
     // The route preview did all of this before the settings existed; a driver who never opens them sees no change.
-    // Drawing the vehicle on the line came after them, and is on unless the driver switches it off.
+    // Drawing the vehicle on the line and the turn card came after them: both on, the card with the turn after next and
+    // without "continue straight".
     @Test
     fun `the defaults keep every part of the route preview on and show the arrival time`() {
         assertEquals(
@@ -37,6 +38,10 @@ class NavigationPreferencesTest {
                 restoreRouteAfterRestart = true,
                 routeRowTime = RouteRowTime.ARRIVAL,
                 vehicleOnRouteLine = true,
+                turnCard = true,
+                turnCardNextAfter = true,
+                turnCardStraight = false,
+                spokenPrompts = true,
             ),
             NavigationSettings.Default,
         )
@@ -52,8 +57,15 @@ class NavigationPreferencesTest {
             store.setRestoreRouteAfterRestart(false)
             store.setRouteRowTime(RouteRowTime.REMAINING)
             store.setVehicleOnRouteLine(false)
+            store.setTurnCard(false)
+            store.setTurnCardNextAfter(false)
+            store.setTurnCardStraight(true)
+            store.setSpokenPrompts(false)
 
-            assertEquals(NavigationSettings(false, false, false, RouteRowTime.REMAINING, false), store.settings.first())
+            assertEquals(
+                NavigationSettings(false, false, false, RouteRowTime.REMAINING, false, false, false, true, false),
+                store.settings.first(),
+            )
         }
 
     // A later build may add a choice; an older one that reads it shows the arrival time rather than fail.
@@ -71,7 +83,7 @@ class NavigationPreferencesTest {
         }
 
     @Test
-    fun `a reset restores all five settings`() =
+    fun `a reset restores every setting`() =
         runTest {
             val store = clearedStore()
             store.setRerouteAutomatically(false)
@@ -79,6 +91,10 @@ class NavigationPreferencesTest {
             store.setRestoreRouteAfterRestart(false)
             store.setRouteRowTime(RouteRowTime.REMAINING)
             store.setVehicleOnRouteLine(false)
+            store.setTurnCard(false)
+            store.setTurnCardNextAfter(false)
+            store.setTurnCardStraight(true)
+            store.setSpokenPrompts(false)
 
             store.resetToDefaults()
 
